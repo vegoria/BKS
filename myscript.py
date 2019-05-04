@@ -1,7 +1,10 @@
 #!/usr/bin/python
 import sys
 import re
-
+import json
+import json
+import hashlib
+from virus_total_apis import PublicApi as VirusTotalPublicApi
 #fromFieldAndReplyToMatch = False
 #pathElementsMatch = False
 
@@ -89,7 +92,7 @@ def matchPath(receivedList):
 		fromServer = getFromAndByServerData(item)
 		fromFields.append(fromServer)
 	warnings = checkIfPathIsCorrect(fromFields)
-	return warnings
+	return warnings, fromFields[0][0]
 
 def checkPath(email):
 	warnings = []
@@ -98,9 +101,9 @@ def checkPath(email):
 		warnings.append("Warning: couldn't find mail path!")
 		return warnings
 	receivedList.reverse()
-	tmpWarnings = matchPath(receivedList)
+	tmpWarnings, fromDomain = matchPath(receivedList)
 	warnings = mergeWarnings(warnings, tmpWarnings)
-	return warnings
+	return warnings, fromDomain
 
 def getMailId(email):
 	mailId = ""
@@ -108,6 +111,48 @@ def getMailId(email):
 	for match in ptrn.finditer(email):
 		mailId = match.groups()[0]
 	return mailId
+
+def checkSPF(email):
+	warnings = []
+	ptrn = re.compile("Received-SPF: (\w+)")
+	countSPF = 0
+	for match in ptrn.finditer(email):
+		countSPF = countSPF + 1
+		mached - match.groups()[0]
+		if mached != "pass":
+			warnings.append("".join(["Warning: there is SPF record with ", mached, " status!"]))
+	if countSPF == 0:
+		warnings.append("Warning: there is no SPF records")
+	return warnings
+
+def checkInVirusTotal(fromDomain):
+	try:
+		API_KEY = '6953d846c57e206154533f8f72136c973877704492c927da6a434a0d13aadd63'
+		vt = VirusTotalPublicApi(API_KEY)
+		report = vt.get_url_report(fromDomain)
+		return ["".join(["VirusTotal report: found ", str(report["results"]["positives"]), " issues in ", str(report["results"]["total"]), " entries"])]
+	except:
+		return ["Warning: could not retrive VirusTotal report"]
+
+def checkURLs(email):
+	warnings = []
+	ptrn = re.compile("src=['\"](.*?)['\"]")
+	API_KEY = '6953d846c57e206154533f8f72136c973877704492c927da6a434a0d13aadd63'
+	vt = VirusTotalPublicApi(API_KEY)
+	for match in ptrn.finditer(email):
+		try:
+			matched = match.groups()[0]
+			report = vt.get_url_report(matched)
+			warnings.append("".join(["VirusTotal report for: ",
+						 matched,
+						 " issues: ",
+						 str(report["results"]["positives"]),
+						 " from ",
+						 str(report["results"]["total"])])
+						 )
+		except:
+			warnings.append("".join(["Warning: no VirusTotal report for ", matched]))
+	return warnings
 
 warnings = []
 email = readWholeMail()
@@ -124,7 +169,13 @@ if fromField and replyToField:
 	tmpWarnings = checkFromAndReply(fromField, replyToField)
 	warnings = mergeWarnings(warnings, tmpWarnings)
 
-tmpWarnings = checkPath(email)
+tmpWarnings, fromDomain = checkPath(email)
+warnings = mergeWarnings(warnings, tmpWarnings)
+tmpWarnings = checkSPF(email)
+warnings = mergeWarnings(warnings, tmpWarnings)
+tmpWarnings = checkInVirusTotal(fromDomain)
+warnings = mergeWarnings(warnings, tmpWarnings)
+tmpWarnings = checkURLs(email)
 warnings = mergeWarnings(warnings, tmpWarnings)
 mailId = getMailId(email)
 newMail = "\n".join([email, "\n".join(warnings)])
@@ -133,4 +184,3 @@ atIdx = receipent.find("@")
 receipent = receipent[:atIdx]
 f = open("/home/"+receipent+"/Maildir/new/"+mailId, "w+")
 f.write(newMail)
-
